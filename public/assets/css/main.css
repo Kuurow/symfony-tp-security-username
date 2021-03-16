@@ -3,3 +3,29 @@
     margin-left: auto;
     margin-right: auto;
 }
+
+.h1centered {
+    text-align: center;
+}
+
+.username-color {
+    color: #fff !important;
+    font-weight: bold;
+}
+
+.nav-link.username-color.name {
+    transition: ease-in-out .3s;
+}
+
+.nav-link.username-color.name:hover {
+    color: rgb(161, 161, 161) !important;
+}
+
+.logout-link {
+    margin-left: 3px;
+    transition: ease-in-out .3s;
+}
+
+.logout-link:hover {
+    color: rgb(255, 25, 25) !important;
+}
