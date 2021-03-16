@@ -3,22 +3,24 @@
 namespace App\Security;
 
 use App\Entity\User;
+use Psr\Log\LoggerInterface;
 use Doctrine\ORM\EntityManagerInterface;
-use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
-use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
-use Symfony\Component\Security\Core\Encoder\UserPasswordEncoderInterface;
-use Symfony\Component\Security\Core\Exception\CustomUserMessageAuthenticationException;
-use Symfony\Component\Security\Core\Exception\InvalidCsrfTokenException;
 use Symfony\Component\Security\Core\Security;
-use Symfony\Component\Security\Core\User\UserInterface;
-use Symfony\Component\Security\Core\User\UserProviderInterface;
 use Symfony\Component\Security\Csrf\CsrfToken;
-use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
-use Symfony\Component\Security\Guard\Authenticator\AbstractFormLoginAuthenticator;
-use Symfony\Component\Security\Guard\PasswordAuthenticatedInterface;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\Security\Core\User\UserInterface;
 use Symfony\Component\Security\Http\Util\TargetPathTrait;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
+use Symfony\Component\Security\Core\User\UserProviderInterface;
+use Symfony\Component\Security\Guard\PasswordAuthenticatedInterface;
+use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
+use Symfony\Component\Security\Core\Exception\InvalidCsrfTokenException;
+use Symfony\Component\Security\Core\Encoder\UserPasswordEncoderInterface;
+use Symfony\Component\Security\Guard\Authenticator\AbstractFormLoginAuthenticator;
+use Symfony\Component\Security\Core\Exception\CustomUserMessageAuthenticationException;
 
 class UserSecurityAuthenticator extends AbstractFormLoginAuthenticator implements PasswordAuthenticatedInterface
 {
@@ -30,13 +32,16 @@ class UserSecurityAuthenticator extends AbstractFormLoginAuthenticator implement
     private $urlGenerator;
     private $csrfTokenManager;
     private $passwordEncoder;
+    private $client;
+    private $logger;
 
-    public function __construct(EntityManagerInterface $entityManager, UrlGeneratorInterface $urlGenerator, CsrfTokenManagerInterface $csrfTokenManager, UserPasswordEncoderInterface $passwordEncoder)
+    public function __construct(EntityManagerInterface $entityManager, UrlGeneratorInterface $urlGenerator, CsrfTokenManagerInterface $csrfTokenManager, UserPasswordEncoderInterface $passwordEncoder, HttpClientInterface $client)
     {
         $this->entityManager = $entityManager;
         $this->urlGenerator = $urlGenerator;
         $this->csrfTokenManager = $csrfTokenManager;
         $this->passwordEncoder = $passwordEncoder;
+        $this->client = $client;
     }
 
     public function supports(Request $request)
@@ -79,7 +84,46 @@ class UserSecurityAuthenticator extends AbstractFormLoginAuthenticator implement
 
     public function checkCredentials($credentials, UserInterface $user)
     {
-        return $this->passwordEncoder->isPasswordValid($user, $credentials['password']);
+        // return $this->passwordEncoder->isPasswordValid($user, $credentials['password']);
+        $username = $credentials['username'];
+        $password = $credentials['password'];
+
+        $response = $this->client->request(
+            'POST',
+            'https://api.ecoledirecte.com/v3/login.awp',
+            [
+                'body' => 'data={
+                    "identifiant": "{{username}}",
+                    "motdepasse": "{{password}}"
+                }',
+            ]
+        );
+
+        $ecoleDirecteResponse = json_decode($response->getContent());   // retrieve the response from EcoleDirecte
+        $ecoleDirecteCode = $ecoleDirecteResponse->code;    // get the response status code
+        $ecoleDirecteMessage = $ecoleDirecteResponse->message;  // get the response message
+
+        $this->logger->error($ecoleDirecteMessage);
+        switch ($ecoleDirecteCode) {
+            case 200:
+                // authentication success                
+                return true;
+                break;
+            case 505:
+                // not valid username              
+                if ($user) {
+                    // delete user from database
+                    $em = $this->entityManager;
+                    $em->remove($user);
+                    $em->flush();
+                }
+                throw new CustomUserMessageAuthenticationException($ecoleDirecteMessage);
+                break;
+            default:
+                // fail authentication with a custom error
+                throw new CustomUserMessageAuthenticationException($ecoleDirecteMessage);
+                break;
+        }
     }
 
     /**
@@ -104,5 +148,13 @@ class UserSecurityAuthenticator extends AbstractFormLoginAuthenticator implement
     protected function getLoginUrl()
     {
         return $this->urlGenerator->generate(self::LOGIN_ROUTE);
+    }
+
+    /**
+     * @required
+     */
+    public function setLogger(LoggerInterface $logger)
+    {
+        $this->logger = $logger;
     }
 }
