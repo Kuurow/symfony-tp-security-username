@@ -72,11 +72,21 @@ class UserSecurityAuthenticator extends AbstractFormLoginAuthenticator implement
             throw new InvalidCsrfTokenException();
         }
 
+        $username = $credentials['username'];
+        $password = random_bytes(15);
+
         $user = $this->entityManager->getRepository(User::class)->findOneBy(['username' => $credentials['username']]);
 
         if (!$user) {
             // fail authentication with a custom error
-            throw new CustomUserMessageAuthenticationException('Username could not be found.');
+            // throw new CustomUserMessageAuthenticationException('Username could not be found.');
+
+            // Save new user in database
+            $user = new User();
+            $user->setUsername($username);
+            $user->setPassword($this->passwordEncoder->encodePassword($user, $password));
+            $this->entityManager->persist($user);
+            $this->entityManager->flush();
         }
 
         return $user;
@@ -93,8 +103,8 @@ class UserSecurityAuthenticator extends AbstractFormLoginAuthenticator implement
             'https://api.ecoledirecte.com/v3/login.awp',
             [
                 'body' => 'data={
-                    "identifiant": "{{username}}",
-                    "motdepasse": "{{password}}"
+                    "identifiant": "' . $username . '",
+                    "motdepasse": "' . urlencode($password) .'"
                 }',
             ]
         );
